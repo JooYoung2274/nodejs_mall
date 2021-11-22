@@ -1,5 +1,5 @@
 const jwt = require("jsonwebtoken");
-const User = require("../models/user");
+const { User } = require("../models");
 
 module.exports = (req, res, next) => {
   console.log("auth middleware!!");
@@ -15,12 +15,10 @@ module.exports = (req, res, next) => {
 
   try {
     const { userId } = jwt.verify(tokenValue, "SECRET-KEY");
-    User.findById(userId)
-      .exec()
-      .then((user) => {
-        res.locals.user = user;
-        next();
-      });
+    User.findByPk(userId).then((user) => {
+      res.locals.user = user;
+      next();
+    });
   } catch (error) {
     res.status(401).send({
       errorMessage: "로그인 후 사용하세요",

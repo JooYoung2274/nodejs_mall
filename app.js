@@ -1,18 +1,10 @@
 const express = require("express");
-const mongoose = require("mongoose");
+const { Op } = require("sequelize");
 const jwt = require("jsonwebtoken");
-const User = require("./models/user");
-const Goods = require("./models/goods");
-const Cart = require("./models/cart");
+const { User, Goods, Cart } = require("./models"); //mysql
+
 const authMiddleware = require("./middlewares/auth-middleware");
 const Joi = require("joi");
-
-mongoose.connect("mongodb://localhost/shopping-demo", {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-});
-const db = mongoose.connection;
-db.on("error", console.error.bind(console, "connection error:"));
 
 const app = express();
 const router = express.Router();
@@ -24,6 +16,7 @@ const userSchema = Joi.object({
   email: Joi.string().email().required(),
 });
 
+// 회원가입 API
 router.post("/users", async (req, res) => {
   try {
     const { nickname, email, password, confirmPassword } =
@@ -34,8 +27,10 @@ router.post("/users", async (req, res) => {
       });
       return;
     }
-    const existUsers = await User.find({
-      $or: [{ email }, { nickname }],
+    const existUsers = await User.findAll({
+      where: {
+        [Op.or]: [{ nickname }, { email }],
+      },
     });
     if (existUsers.length) {
       res.status(400).send({
@@ -43,8 +38,7 @@ router.post("/users", async (req, res) => {
       });
       return;
     }
-    const user = new User({ email, nickname, password });
-    await user.save();
+    await User.create({ email, nickname, password });
     res.status(201).send({});
   } catch (err) {
     console.log(err);
@@ -58,10 +52,11 @@ const authSchema = Joi.object({
   email: Joi.string().email().required(),
   password: Joi.string().pattern(new RegExp("^[a-zA-Z0-9]{4,30}$")).required(),
 });
+// login API
 router.post("/auth", async (req, res) => {
   try {
     const { email, password } = await authSchema.validateAsync(req.body);
-    const user = await User.findOne({ email, password }).exec();
+    const user = await User.findOne({ where: { email, password } });
     if (!user) {
       res.status(400).send({
         errorMessage: "입력된 이메일 또는 패스워드가 틀림",
@@ -87,26 +82,24 @@ router.get("/users/me", authMiddleware, async (req, res) => {
 router.get("/goods/cart", authMiddleware, async (req, res) => {
   const { userId } = res.locals.user;
 
-  const cart = await Cart.find({
-    userId,
-  }).exec();
+  const cart = await Cart.findAll({
+    where: { userId },
+  });
 
   const goodsIds = cart.map((c) => c.goodsId);
 
   // 루프 줄이기 위해 Mapping 가능한 객체로 만든것
-  const goodsKeyById = await Goods.find({
-    _id: { $in: goodsIds },
-  })
-    .exec()
-    .then((goods) =>
-      goods.reduce(
-        (prev, g) => ({
-          ...prev,
-          [g.goodsId]: g,
-        }),
-        {}
-      )
-    );
+  const goodsKeyById = await Goods.findAll({
+    where: { goodsId: goodsIds },
+  }).then((goods) =>
+    goods.reduce(
+      (prev, g) => ({
+        ...prev,
+        [g.goodsId]: g,
+      }),
+      {}
+    )
+  );
 
   res.send({
     cart: cart.map((c) => ({
@@ -122,15 +115,17 @@ router.put("/goods/:goodsId/cart", authMiddleware, async (req, res) => {
   const { quantity } = req.body;
 
   const existsCart = await Cart.findOne({
-    userId,
-    goodsId,
-  }).exec();
+    where: {
+      userId,
+      goodsId,
+    },
+  });
 
   if (existsCart) {
     existsCart.quantity = quantity;
     await existsCart.save();
   } else {
-    const cart = new Cart({
+    Cart.create({
       userId,
       goodsId,
       quantity,
@@ -146,27 +141,30 @@ router.delete("/goods/:goodsId/cart", authMiddleware, async (req, res) => {
   const { goodsId } = req.params;
 
   const existsCart = await Cart.findOne({
-    userId,
-    goodsId,
-  }).exec();
+    where: {
+      userId,
+      goodsId,
+    },
+  });
   if (existsCart) {
-    existsCart.delete();
+    existsCart.destroy();
   }
   res.send({});
 });
 
 router.get("/goods", authMiddleware, async (req, res) => {
   const { category } = req.query;
-  const goods = await Goods.find(category ? { category } : undefined)
-    .sort("-date")
-    .exec();
+  const goods = await Goods.findAll({
+    order: [["goodsId", "DESC"]],
+    where: category ? { category } : undefined,
+  });
 
   res.send({ goods });
 });
 
 router.get("/goods/:goodsId", authMiddleware, async (req, res) => {
   const { goodsId } = req.params;
-  const goods = await Goods.findById(goodsId).exec();
+  const goods = await Goods.findByPk(goodsId);
 
   if (!goods) {
     res.status(404).send({});
